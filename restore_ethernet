@@ -1,0 +1,47 @@
+#!/bin/bash
+
+
+#First create 
+
+#zenity --error --text='Something very bad has happened!'  
+
+CURRENTUSER=`echo $USER`
+
+zenity --info --text="Bienvenue `echo $CURRENTUSER` je suis le Logiciel NetRestore Ekimia , appuyez sur OK puis entrez votre mot de passe"
+
+PASSWORD=`zenity --password`
+
+#echo $PASSWORD
+
+
+echo $PASSWORD |sudo -S bash
+
+
+
+(echo "10" ; sleep 0
+echo "# Sauvegarde des fichiers de configuration" ; sleep 1
+sudo mv /etc/touch10.txt
+echo "20" ; sleep 1
+echo "# Resetting cron jobs" ; sleep 1
+echo "50" ; sleep 1
+echo "This line will just be ignored" ; sleep 1
+echo "75" ; sleep 1
+echo "# Rebooting system" ; sleep 1
+echo "100" ; sleep 1
+) |zenity --progress \
+  --title="Update System Logs" \
+  --text="Scanning mail logs..." \
+  --percentage=0
+
+
+
+
+zenity --info --text="Programme terminé"
+
+
+
+
+
+exit 0
+
+
