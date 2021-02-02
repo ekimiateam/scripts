@@ -53,6 +53,7 @@ testversiondistro()
    upgradedistro
 
  
-   echo "Mise à jour terminée. Veuillez redémarrer"
+   echo "Mise à jour terminée. appuyez sur une touche et  redémarrer"
+   read fin
    
 #---------------------------------------------#
