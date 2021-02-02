@@ -45,7 +45,8 @@ testversiondistro()
    #--- Mise a jour de la distribution :
 
    echo "Démarrage de la mise à jour de la distribution : ne pas éteindre votre ordinateur durant l'opération"
-   echo "Répondre yes aux rares questions posées "
+   echo "Répondre yes aux rares questions posées , appuyez sur une touche pour démarrer"
+   read any
    sudo apt-get update
    
    sudo apt upgrade -y
