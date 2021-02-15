@@ -23,16 +23,29 @@ upgradedistro()
 }
 
 #--- Procedure de test de la version avant maj :
-testversiondistro()
+isobsolete()
 {
    #echo "A faire : test version"
    no_version=`lsb_release -rs`
    #-- Compare la chaine de caracteres decrivant le no de version :
-   if [ $no_version != 15.10 ] ; then
-      echo "Votre version d'Ubuntu ne nécessite pas de mise à jour."
-      zenity --info --text "Votre version d'Ubuntu ne nécessite pas de mise à jour."
-      exit
+   if [ $no_version != 20.04 || $no_version = 17.10] ; then
+      echo "Votre version d'Ubuntu est obsolète , réparons ça"
+      zenity --info --text "Votre version d'Ubuntu est obsolète , réparons ça"
+      
+   else 
+      echo "Votre version d'Ubuntu n'est pas obsolète "
+      zenity --info --text "Votre version d'Ubuntu n'est pas obsolète "
+      
    fi
+}
+
+
+islts
+{
+    if [ $no_version != 20.04 || $no_version = 17.10] ; then
+
+
+
 }
 #---------------------------------------------#
 
