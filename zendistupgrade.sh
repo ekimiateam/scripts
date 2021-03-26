@@ -104,8 +104,8 @@ testversiondistro()
    no_version=`lsb_release -rs`
    #-- Compare la chaine de caracteres decrivant le no de version :
    if [ $no_version != 15.10 ] ; then
-      echo "Votre version d'Ubuntu ne nécessite pas de mise à jour."
-      zenity --info --text "Votre version d'Ubuntu ne nécessite pas de mise à jour."
+      echo "Votre version d'Ubuntu est $no_version et ne nécessite pas de mise à jour."
+      zenity --info --text "Votre version d'Ubuntu est $no_version et ne nécessite pas de mise à jour."
       exit
    fi
 }
@@ -129,8 +129,7 @@ if [ $? = 0 ] ; then
    sudo apt-get update
 
    #--- Mise a jour de la distribution :
-   zenity --info --text "Démarrage de la mise à jour de la distribution : ne pas éteindre votre ordinateur durant l'opération"
-   echo "Démarrage de la mise à jour de la distribution : ne pas éteindre votre ordinateur durant l'opération"
+   zenity --info --text "Démarrage de la mise à jour de la distribution : ne pas éteindre votre ordinateur durant l'opération (2H )"
    upgradedistro
 
    #-- Execute les actions TBD manual du TODO :
