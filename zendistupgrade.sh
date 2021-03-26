@@ -26,7 +26,7 @@ modifsourcelist()
 {
    SRC=/etc/apt/sources.list
    echo "Modifications du fichier sources.list..."
-   sudo cp $SRC ${SRC}.1510
+   sudo cp $SRC ${SRC}.OBSOLETE
 
    #-- Pour les partner, changer wily en xenial !! --
    #- Doit devenir : deb http://archive.canonical.com/ubuntu xenial partner
@@ -103,9 +103,9 @@ testversiondistro()
    #echo "A faire : test version"
    no_version=`lsb_release -rs`
    #-- Compare la chaine de caracteres decrivant le no de version :
-   if [ $no_version != 15.10 ] ; then
-      echo "Votre version d'Ubuntu est $no_version et ne nécessite pas de mise à jour."
-      zenity --info --text "Votre version d'Ubuntu est $no_version et ne nécessite pas de mise à jour."
+   if [[ $no_version == "20.04" || $no_version == "18.04" || $no_version == "16.04" || $no_version == "14.04" ]] ; then
+      echo "Votre version d'Ubuntu $no_version est LTS et n'est pas obsolète'."
+      zenity --info --text "Votre version d'Ubuntu $no_version est LTS et n'est pas obsolète'"
       exit
    fi
 }
@@ -115,8 +115,8 @@ testversiondistro()
 #==== Procedure principale =====================================#
 #--- Affichage de la boîte de dialogue pour confirmation :
 zenity --question \
---title "Ekimia - Mise à jour vers Ubuntu 16.04" \
---text "Voulez-vous faire la mise à jour vers Ubuntu 16.04 ?"
+--title "Ekimia - Mise à niveau vers Ubuntu LTS " \
+--text "Voulez-vous faire la mise à à niveau vers Ubuntu LTS  ?"
 
 if [ $? = 0 ] ; then
    #--- Vérifie si la version est inférieure ou egale à 15.10 :
