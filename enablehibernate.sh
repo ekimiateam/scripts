@@ -20,6 +20,9 @@ swapfileoffset=1
 
 # Get UUID & swap_offset 
 
+rootuuid=$((sudo findmnt -no SOURCE,UUID -T /swapfile) |cut -d\  -f 2) 
+
+echo rootuuid = $rootuuid
 
 # Modify initramfs 
 
