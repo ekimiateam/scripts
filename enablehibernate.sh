@@ -46,6 +46,15 @@ echo swapfileoffset = $swapfileoffset
 
 sudo update-initramfs -k all -u
 
+#Update grub 
+
+#TODO Test if grub was already containing the string 
+#if [[ grep -q "resume" ]]
+
+grubstring="resume=UUID=$rootuuid resume_offset=$swapfileoffset"
+
+sudo sed -i "/^GRUB_CMDLINE_LINUX_DEFAULT=/ s|"\(.*\)"|"\1 $grubstring"|" /etc/default/grub
+
 
 # update polkit 
 
