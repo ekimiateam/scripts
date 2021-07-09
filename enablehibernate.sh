@@ -13,8 +13,15 @@ sudo apt -y install uswsusp
 
 
 # Compute ideal size of swap ( Memesize * 1.5 ) 
-swapfilesize=$(echo "$(cat /proc/meminfo | grep MemTotal | grep -oh '[0-9]*') * 1.5" |bc -l | awk '{print int($1)}')
+swapfilesize=$(echo "$(cat /proc/meminfo | grep MemTotal | grep -oh '[0-9]*') * 1.1" |bc -l | awk '{print int($1)}')
 echo "swapfilesize will be $swapfilesize bytes"
+echo " creating new swapfile"
+sudo swapoff /swapfile
+sudo dd if=/dev/zero of=/swapfile bs=swapfilesize count=1024 conv=notrunc
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+
 swapfileoffset=1
 
 
@@ -24,9 +31,15 @@ rootuuid=$((sudo findmnt -no SOURCE,UUID -T /swapfile) |cut -d\  -f 2)
 
 echo rootuuid = $rootuuid
 
+
+swapfileoffset= $((sudo swap-offset /swapfile)  |cut -d\  -f 4) 
+
+echo swapfileoffset = $swapfileoffset
+
+
 # Modify initramfs 
 
-
+ echo "RESUME=$rootuuid resume_offset=$swapfileoffset" |sudo tee -a /etc/initramfs-tools/conf.d/resume
 
 # Update initramfs 
 
