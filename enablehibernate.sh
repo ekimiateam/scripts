@@ -5,10 +5,17 @@
 
 echo " starting enabling hibernate "
 
+
+
 # install needed packages 
+
+sudo apt -y install uswsusp
 
 
 # Compute ideal size of swap ( Memesize * 1.5 ) 
+swapfilesize=$(echo "$(cat /proc/meminfo | grep MemTotal | grep -oh '[0-9]*') * 1.5" |bc -l | awk '{print int($1)}')
+echo "swapfilesize will be $swapfilesize bytes"
+swapfileoffset=1
 
 
 # Get UUID & swap_offset 
@@ -20,7 +27,7 @@ echo " starting enabling hibernate "
 
 # Update initramfs 
 
-sudo update-initramfs -k all -u
+#sudo update-initramfs -k all -u
 
 
 # update polkit 
