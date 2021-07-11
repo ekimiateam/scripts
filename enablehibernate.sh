@@ -40,7 +40,7 @@ echo swapfileoffset = $swapfileoffset
 
 # Modify initramfs 
 
- echo "RESUME=UUID=$rootuuid resume_offset=$swapfileoffset" |sudo tee /etc/initramfs-tools/conf.d/resume
+echo "RESUME=UUID=$rootuuid resume_offset=$swapfileoffset" |sudo tee /etc/initramfs-tools/conf.d/resume
 
 # Update initramfs 
 
@@ -77,9 +77,4 @@ EOF
 
 
 echo "Hibernate now active , press a key "
-
 read p
-
-exit 0
-
-# 
