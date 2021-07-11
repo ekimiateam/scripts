@@ -16,7 +16,7 @@ sudo apt -y install uswsusp pm-utils hibernate
 # Compute ideal size of swap ( Memesize * 1.5 ) 
 swapfilesize=$(echo "$(cat /proc/meminfo | grep MemTotal | grep -oh '[0-9]*') * $swapfilefactor" |bc -l | awk '{print int($1)}')
 echo "swapfilesize will be $swapfilesize bytes"
-echo " creating new swapfile"
+echo " creating new swapfile, this can take up to 2 minutes "
 sudo swapoff /swapfile
 sudo dd if=/dev/zero of=/swapfile bs=$swapfilesize count=1024 conv=notrunc
 sudo mkswap /swapfile
@@ -76,6 +76,10 @@ ResultActive=yes"
 EOF
 
 
-echo "Hibernate now active"
+echo "Hibernate now active , press a key "
+
+read p
+
+exit 0
 
 # 
