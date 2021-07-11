@@ -48,15 +48,19 @@ sudo update-initramfs -k all -u
 
 #Update grub 
 
+echo "Update Grub config"
 #TODO Test if grub was already containing the string 
 #if [[ grep -q "resume" ]]
 
 grubstring="resume=UUID=$rootuuid resume_offset=$swapfileoffset"
 
-sudo sed -i "/^GRUB_CMDLINE_LINUX_DEFAULT=/ s|"\(.*\)"|"\1 $grubstring"|" /etc/default/grub
 
+sudo sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s|"\(.*\)"|"\1 '"${grubstring}"'"|' /etc/default/grub
 
-# update polkit 
+sudo update-grub
+
+echo " Update policy kit"
+
 
 
 sudo tee /etc/polkit-1/localauthority/10-vendor.d/com.ubuntu.desktop.pkla <<EOF
@@ -70,5 +74,8 @@ Identity=unix-user:*
 Action=org.freedesktop.login1.hibernate;org.freedesktop.login1.handle-hibernate-key;org.freedesktop.login1;org.freedesktop.login1.hibernate-multiple-sessions;org.freedesktop.login1.hibernate-ignore-inhibit
 ResultActive=yes"
 EOF
+
+
+echo "Hibernate now active"
 
 # 
