@@ -2,7 +2,8 @@
 # Ekimia.fr 2021 
 # Enables Hibernation with swap file with menus on Ubuntu 20.04
 
-
+echo "WARNING : hibernate might fail on your machine if not officially supported , use with caution , press a key"
+read start
 echo " starting enabling hibernate "
 
 #CHange this value to size the swapfile X times your ram
