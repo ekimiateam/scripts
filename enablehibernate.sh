@@ -91,9 +91,9 @@ sudo echo "HandleLidSwitch=suspend-then-hibernate" | sudo tee -a /etc/systemd/lo
 
 echo "Forcing sleepandhibernate when DE ask for sleep ( waiting for gnome to fix this) "
 
-sudo mv /etc/systemd/system/systemd-suspend.service /etc/systemd/system/systemd-suspendsave.service
+sudo mv /usr/lib/systemd/system/systemd-suspend.service /usr/lib/systemd/system/systemd-suspendsave.service
 
-sudo ln -s /usr/lib/systemd/system/systemd-suspend-then-hibernate.service /etc/systemd/system/systemd-suspend.service
+sudo ln -s /usr/lib/systemd/system/systemd-suspend-then-hibernate.service /usr/lib/systemd/system/systemd-suspend.service
 
 
 echo "Suspend-then-hibernate now active , press a key "
