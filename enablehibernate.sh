@@ -77,5 +77,17 @@ ResultActive=yes"
 EOF
 
 
-echo "Hibernate now active , press a key "
+echo " setting hibernate delay after suspend at 1h in /etc/systemd/sleep.conf "
+
+sudo echo "HibernateDelaySec=3600" | sudo tee -a /etc/systemd/sleep.conf
+
+
+echo " setting sleep-then-hibernate on lid close in /etc/systemd/logind.conf "
+
+sudo echo "HandleSuspendKey=suspend-then-hibernate" | sudo tee -a /etc/systemd/logind.conf
+
+sudo echo "HandleLidSwitch=suspend-then-hibernate" | sudo tee -a /etc/systemd/logind.conf
+
+
+echo "Suspend-then-hibernate now active , press a key "
 read p
