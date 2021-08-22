@@ -7,7 +7,7 @@ read start
 echo " starting enabling hibernate "
 
 #CHange this value to size the swapfile X times your ram
-swapfilefactor=1.5
+swapfilefactor=1.3
 
 # install needed packages 
 
@@ -90,6 +90,8 @@ sudo echo "HandleLidSwitch=suspend-then-hibernate" | sudo tee -a /etc/systemd/lo
 
 
 echo "Forcing sleepandhibernate when DE ask for sleep ( waiting for gnome to fix this) "
+
+#TODO : We need to handle old install where systemd is in /lib
 
 sudo mv /usr/lib/systemd/system/systemd-suspend.service /usr/lib/systemd/system/systemd-suspendsave.service
 
