@@ -1,9 +1,9 @@
 echo  " salut script d'installl mode kiosk " 
 
 # Create the guest user with /tmp/guest as home directory 
-sudo useradd -d /tmp/guestx -p guest guest
+sudo useradd -d /tmp/guest -p guest guest
 # Copy the Postlogin file "Default" 
-
+sudo cp custom.conf /etc/gdm3/
 sudo mv /etc/gdm3/PostLogin/Default /etc/gdm3/PostLogin/Default.back
 sudo cp -f Default /etc/gdm3/PostLogin/Default
 # change the rights of the default file to 755
