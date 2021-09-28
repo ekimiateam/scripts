@@ -1,0 +1,13 @@
+
+
+
+#!/bin/sh
+guestuser="guest" ## Next set up guest user session files/folders
+
+
+   rm -rf /tmp/"$guestuser"
+   mkdir -p /tmp/"$guestuser"
+
+   chown -R "$guestuser":"$guestuser" /tmp/"$guestuser"
+
+exit 
