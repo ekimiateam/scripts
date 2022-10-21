@@ -5,8 +5,8 @@ wget https://raw.githubusercontent.com/tuxedocomputers/tuxedo.sh/master/keys/ubu
 sudo apt-key add ubuntu.pub
 
 
-echo "deb http://deb.tuxedocomputers.com/ubuntu focal main" |sudo tee -a /etc/apt/sources.list.d/tuxedo-computers.list
+echo "deb http://deb.tuxedocomputers.com/ubuntu $(lsb_release -cs) main" |sudo tee -a /etc/apt/sources.list.d/tuxedo-computers.list
 
 sudo apt update
 
-sudo apt install tuxedo-control-center
+sudo apt install -y tuxedo-control-center
