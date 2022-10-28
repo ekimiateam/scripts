@@ -5,6 +5,14 @@
 #Run as root 
 
 
+getversion()
+{
+lsb_dist_id="$(lsb_release -si)"   # e.g. 'Ubuntu', 'LinuxMint', 'openSUSE project'
+lsb_release="$(lsb_release -sr)"   # e.g. '13.04', '15', '12.3'
+lsb_codename="$(lsb_release -sc)"  # e.g. 'raring', 'olivia', 'Dartmouth'
+
+}
+
 
 #--- Procedure d'upgrade de la distribution :
 upgradedistro()
@@ -28,28 +36,21 @@ isobsolete()
    #echo "A faire : test version"
    no_version=`lsb_release -rs`
    #-- Compare la chaine de caracteres decrivant le no de version :
-   if [ $no_version != 20.04 || $no_version = 17.10] ; then
-      echo "Votre version d'Ubuntu est obsolète , réparons ça"
-      zenity --info --text "Votre version d'Ubuntu est obsolète , réparons ça"
-      
+   if [[ $no_version != "20.04" && $no_version != "18.04" && $no_version != "16.04" && $no_version != "14.04" ]]; then
+      echo "Votre version $no_version d'Ubuntu est obsolète , réparons ça"
+      zenity --info --text "Votre version d'Ubuntu est obsolète "
+      return 1
    else 
-      echo "Votre version d'Ubuntu n'est pas obsolète "
+      echo "Votre version $no_version d'Ubuntu n'est pas obsolète "
       zenity --info --text "Votre version d'Ubuntu n'est pas obsolète "
-      
+      return 0
    fi
 }
 
-
-islts
-{
-    if [ $no_version != 20.04 || $no_version = 17.10] ; then
-
-
-
-}
 #---------------------------------------------#
 
-
+startdistupgrade()
+{
 #==== Procedure principale =====================================#
 
    #--- Mise a jour de la base :
@@ -68,5 +69,10 @@ islts
  
    echo "Mise à jour terminée. appuyez sur une touche et  redémarrer"
    read fin
-   
+}
+
+
+if isobsolete; then 
+ echo "obsolete"
+fi
 #---------------------------------------------#
