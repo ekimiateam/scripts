@@ -11,5 +11,8 @@ mount -t auto -o acl /dev/disk/by-uuid/$lediskuuid  /media/mycomputer
 mount --bind /dev /media/mycomputer/dev
 mount --bind /tmp /media/mycomputer/tmp
 mount --bind /proc /media/mycomputer/proc
-mount --bind /etc/resolv.conf /media/mycomputer/etc/resolv.conf
+mount --bind /run  /media/mycomputer/run
+mount -t sysfs /sys /media/mycomputer/sys
+mount  --bind /dev/pts /media/mycomputer/dev/pts 
+#mount --bind /etc/resolv.conf /media/mycomputer/etc/resolv.conf
 chroot /media/mycomputer
