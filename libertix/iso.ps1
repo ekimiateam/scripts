@@ -1,93 +1,232 @@
-$url = "https://mirrors.gandi.net/archlinux/iso/2025.01.01/archlinux-2025.01.01-x86_64.iso"
-$response = Invoke-WebRequest -Uri $url -Method Head
-$fileSize = $response.Headers["Content-Length"]
-Write-Output "File size: $fileSize bytes"
-$requiredSpaceMB = [math]::Ceiling($fileSize / 1MB) + 500
-$windowsPartition = Get-Partition -DriveLetter C
-$newSizeBytes = $windowsPartition.Size - ($requiredSpaceMB * 1MB)
-Resize-Partition -DriveLetter C -Size $newSizeBytes
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$IsoUrl = "https://mirrors.ircam.fr/pub/zorinos-isos/17/Zorin-OS-17.2-Core-64-bit.iso",
+    [switch]$Revert
+)
 
-Write-Output "Partition resized. Reserved space: $requiredSpaceMB MB"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
-# Create the new partition in the freed space
-$disk = Get-Disk | Where-Object { $_.Path -eq $windowsPartition.DiskPath }
-$newPartition = New-Partition -DiskNumber $disk.Number -Size ($requiredSpaceMB * 1MB) -AssignDriveLetter
-$driveLetter = $newPartition.DriveLetter
+function Write-Status($Message) {
+    Write-Output "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'): $Message"
+}
 
-# Change partition type to ESP
-$partitionGUID = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B" # EFI System Partition GUID
-$newPartition | Set-Partition -GptType $partitionGUID
+function Invoke-Revert {
+    Write-Status "Starting revert process..."
+    
+    try {
+        $libertixPartition = Get-Partition | Where-Object { 
+            try {
+                $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
+                return $volume -and $volume.FileSystemLabel -eq "LIBERTIX"
+            } catch {
+                return $false
+            }
+        }
 
-# Format as FAT32 instead of NTFS
-Format-Volume -DriveLetter $driveLetter -FileSystem FAT32 -Force
-Write-Output "Formatted partition ${driveLetter} as FAT32 EFI System Partition"
+        if (-not $libertixPartition) {
+            Write-Status "No LIBERTIX partition found. Nothing to revert."
+            return
+        }
 
-$outFile = Join-Path $PSScriptRoot "archlinux.iso"
-if (Test-Path $outFile) {
-    $existingFile = Get-Item $outFile
-    if ($existingFile.Length -eq $fileSize) {
-        Write-Output "ISO file already exists and size matches. Skipping download..."
-    } else {
-        Write-Output "Existing ISO has wrong size. Downloading..."
-        Write-Output "Downloading ISO..."
-        $job = Start-BitsTransfer -Source $url -Destination $outFile -DisplayName "Arch Linux ISO" -Asynchronous
+        $diskNumber = $libertixPartition.DiskNumber
+        Remove-Partition -DiskNumber $diskNumber -PartitionNumber $libertixPartition.PartitionNumber -Confirm:$false
+
+        $maxSize = (Get-PartitionSupportedSize -DriveLetter C).SizeMax
+        Resize-Partition -DriveLetter C -Size $maxSize
+
+        Write-Status "Revert completed successfully. LIBERTIX partition removed and C: drive extended."
+    }
+    catch {
+        Write-Error "Failed to revert changes: $_"
+        throw
+    }
+}
+
+function Get-IsoFile {
+    param($Url, $OutFile, $ExpectedSize)
+
+    try {
+        if (Test-Path $OutFile) {
+            $existingFile = Get-Item $OutFile
+            if ($existingFile.Length -eq $ExpectedSize) {
+                Write-Status "ISO file already exists and size matches. Skipping download..."
+                return
+            }
+            Write-Status "Existing ISO has wrong size. Downloading..."
+        }
+
+        Write-Status "Starting download from $Url"
+        $job = Start-BitsTransfer -Source $Url -Destination $OutFile -DisplayName "ISO" -Asynchronous
+
         do {
             $progress = [math]::Round(($job.BytesTransferred / $job.BytesTotal) * 100, 2)
-            Write-Progress -Activity "Downloading Arch Linux ISO" -Status "$progress% Complete" -PercentComplete $progress
+            Write-Progress -Activity "Downloading ISO" -Status "$progress% Complete" -PercentComplete $progress
             Start-Sleep -Seconds 1
         } while ($job.JobState -eq "Transferring" -or $job.JobState -eq "Connecting")
 
-        Complete-BitsTransfer -BitsJob $job
-        Write-Output "Download complete"
+        if ($job.JobState -eq "Transferred") {
+            Complete-BitsTransfer -BitsJob $job
+            $downloadedFile = Get-Item $OutFile
+            if ($downloadedFile.Length -ne $ExpectedSize) {
+                throw "Download completed but file size mismatch. Expected: $ExpectedSize, Got: $($downloadedFile.Length)"
+            }
+        } else {
+            $job | Remove-BitsTransfer
+            throw "Download failed with status: $($job.JobState)"
+        }
     }
-} else {
-    Write-Output "Downloading ISO..."
-    $job = Start-BitsTransfer -Source $url -Destination $outFile -DisplayName "Arch Linux ISO" -Asynchronous
-    do {
-        $progress = [math]::Round(($job.BytesTransferred / $job.BytesTotal) * 100, 2)
-        Write-Progress -Activity "Downloading Arch Linux ISO" -Status "$progress% Complete" -PercentComplete $progress
+    catch {
+        if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
+        throw
+    }
+}
+
+function New-LibertixPartition {
+    param($RequiredSpaceMB)
+
+    try {
+        $windowsPartition = Get-Partition -DriveLetter C
+        $supportedSize = Get-PartitionSupportedSize -DriveLetter C
+        $currentSize = $windowsPartition.Size
+        $availableSpace = $currentSize - $supportedSize.SizeMin
+        
+        if ($availableSpace -lt ($RequiredSpaceMB * 1MB)) {
+            throw "Not enough available space. Required: $RequiredSpaceMB MB, Available: $([math]::Floor($availableSpace / 1MB)) MB"
+        }
+
+        $newSizeBytes = $currentSize - ($RequiredSpaceMB * 1MB)
+        if ($newSizeBytes -lt $supportedSize.SizeMin) {
+            throw "Reducing partition would make it smaller than minimum size"
+        }
+
+        Resize-Partition -DriveLetter C -Size $newSizeBytes
+        
+        $disk = Get-Disk | Where-Object { $_.Path -eq $windowsPartition.DiskPath }
+        $newPartition = New-Partition -DiskNumber $disk.Number -Size ($RequiredSpaceMB * 1MB) -AssignDriveLetter
+        
+        if (-not $newPartition) {
+            throw "Failed to create new partition"
+        }
+
+        Start-Sleep -Seconds 2  # Wait for drive letter assignment
+        $volume = $newPartition | Get-Volume
+        if (-not $volume.DriveLetter) {
+            throw "New partition has no drive letter assigned"
+        }
+        
+        Format-Volume -DriveLetter $volume.DriveLetter -FileSystem FAT32 -NewFileSystemLabel "LIBERTIX" -Force
+        return $volume.DriveLetter
+    }
+    catch {
+        Write-Status "Failed to create partition: $_"
+        Write-Status "Attempting to restore C: drive..."
+        try {
+            $supportedSize = Get-PartitionSupportedSize -DriveLetter C
+            if ($windowsPartition.Size -lt $supportedSize.SizeMax) {
+                Resize-Partition -DriveLetter C -Size $supportedSize.SizeMax
+            }
+        } catch {
+            Write-Status "Warning: Failed to restore C: drive size"
+        }
+        throw
+    }
+}
+
+function Get-DriveLetter {
+    param($Volume)
+    
+    # Wait for drive letter assignment
+    $attempts = 0
+    $maxAttempts = 10
+    
+    while ($attempts -lt $maxAttempts) {
+        try {
+            $letter = ($Volume | Get-Volume).DriveLetter
+            if ($letter -and $letter -match '^[A-Z]$') {
+                return $letter
+            }
+        } catch {
+            Write-Status "Retrying drive letter detection..."
+        }
         Start-Sleep -Seconds 1
-    } while ($job.JobState -eq "Transferring" -or $job.JobState -eq "Connecting")
-
-    Complete-BitsTransfer -BitsJob $job
-    Write-Output "Download complete"
-}
-
-Write-Output "Writing ISO to partition ${driveLetter}..."
-
-# Download and extract dd if not present
-$ddPath = Join-Path $PSScriptRoot "dd.exe"
-if (-not (Test-Path $ddPath)) {
-    $ddZipUrl = "http://www.chrysocome.net/downloads/bf8163783362fa7d5f9b5a2bd0e3a2de/dd-0.5.zip"
-    $ddZipPath = Join-Path $PSScriptRoot "dd.zip"
-    Invoke-WebRequest -Uri $ddZipUrl -OutFile $ddZipPath
-    Expand-Archive -Path $ddZipPath -DestinationPath $PSScriptRoot
-    Remove-Item $ddZipPath
-}
-
-# Write ISO to partition using dd
-$volumePath = "\\.\${driveLetter}:"
-& $ddPath if="$outFile" of="$volumePath" bs=4M --progress
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Output "ISO successfully written to partition ${driveLetter}"
-    Write-Output "Process completed. The system can now be booted from partition ${driveLetter}"
-    Set-Volume -DriveLetter $driveLetter -NewFileSystemLabel "ARCHISO"
-    Write-Output "Partition labeled as ARCHISO for rEFInd detection"
-
-    $refindConf = "C:\EFI\refind\refind.conf"
-    if (Test-Path $refindConf) {
-        Add-Content $refindConf @"
-menuentry "Arch ISO (ARCHISO)" {
-    volume  "ARCHISO"
-    loader  \EFI\boot\bootx64.efi
-    icon    \EFI\refind\icons\os_arch.png
-}
-"@
-        Write-Output "Added Arch ISO entry to rEFInd config."
-    } else {
-        Write-Output "rEFInd config not found. Please add an entry manually."
+        $attempts++
     }
-} else {
-    throw "Failed to write ISO to partition. dd exit code: $LASTEXITCODE"
+    throw "Failed to get valid drive letter after $maxAttempts attempts"
+}
+
+# Main execution block
+try {
+    if ($Revert) {
+        Invoke-Revert
+        exit 0
+    }
+
+    $url = $IsoUrl
+    $response = Invoke-WebRequest -Uri $url -Method Head
+    $fileSize = [long]$response.Headers["Content-Length"]
+    $requiredSpaceMB = [math]::Ceiling($fileSize / 1MB) + 500
+    
+    Write-Status "Required space: $requiredSpaceMB MB"
+    
+    $driveLetter = New-LibertixPartition -RequiredSpaceMB $requiredSpaceMB
+    if (-not $driveLetter) {
+        throw "Failed to get valid drive letter for new partition"
+    }
+    Write-Status "Created and formatted partition ${driveLetter}"
+
+    $outFile = Join-Path $PSScriptRoot "libertix.iso"
+    Get-IsoFile -Url $url -OutFile $outFile -ExpectedSize $fileSize
+
+    Write-Status "Mounting ISO and copying contents..."
+    $mountResult = Mount-DiskImage -ImagePath $outFile -PassThru
+    Start-Sleep -Seconds 2  # Give Windows time to register the mount
+    
+    try {
+        $isoDrive = Get-DriveLetter -Volume ($mountResult | Get-Volume)
+        if (-not $isoDrive) {
+            throw "Failed to get ISO drive letter"
+        }
+        Write-Status "ISO mounted at ${isoDrive}:"
+
+        # Get the LIBERTIX volume directly
+        $libertixVolume = Get-Volume | Where-Object { $_.FileSystemLabel -eq "LIBERTIX" }
+        if (-not $libertixVolume) {
+            throw "Cannot find LIBERTIX volume"
+        }
+        
+        $destDrive = $libertixVolume.DriveLetter
+        if (-not $destDrive -or -not ($destDrive -match '^[A-Z]$')) {
+            throw "Invalid destination drive letter: $destDrive"
+        }
+        Write-Status "Copying files to ${destDrive}:"
+
+        $destPath = "${destDrive}:"
+        if (-not (Test-Path "${isoDrive}:\")) {
+            throw "Cannot access mounted ISO at ${isoDrive}:"
+        }
+
+        Copy-Item -Path "${isoDrive}:\*" -Destination $destPath -Recurse -Force -ErrorAction Stop
+        Write-Status "Files copied successfully"
+
+        $efiPath = Join-Path $destPath "EFI\BOOT"
+        if (-not (Test-Path $efiPath)) {
+            New-Item -ItemType Directory -Path $efiPath -Force | Out-Null
+        }
+
+        if (Test-Path "${isoDrive}:\EFI\BOOT\bootx64.efi") {
+            Copy-Item "${isoDrive}:\EFI\BOOT\bootx64.efi" -Destination $efiPath -Force
+        }
+
+        Write-Status "Process completed successfully. The system can now be booted from partition ${destDrive}"
+    }
+    finally {
+        Write-Status "Dismounting ISO..."
+        Dismount-DiskImage -ImagePath $outFile
+    }
+}
+catch {
+    Write-Error "Script failed: $_"
+    exit 1
 }
