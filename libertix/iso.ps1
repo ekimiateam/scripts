@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory=$false)]
     [string]$IsoUrl = "https://mirrors.ircam.fr/pub/zorinos-isos/17/Zorin-OS-17.2-Core-64-bit.iso",
-    [switch]$Revert
+    [switch]$Revert,
+    [string]$LocalIso
 )
 
 Set-StrictMode -Version Latest
@@ -16,6 +17,13 @@ function Invoke-Revert {
     Write-Status "Starting revert process..."
     
     try {
+        # Remove ISO file if it exists
+        $isoFile = Join-Path $PSScriptRoot "libertix.iso"
+        if (Test-Path $isoFile) {
+            Write-Status "Removing leftover ISO file..."
+            Remove-Item -Path $isoFile -Force
+        }
+
         $libertixPartition = Get-Partition | Where-Object { 
             try {
                 $volume = $_ | Get-Volume -ErrorAction SilentlyContinue
@@ -120,17 +128,47 @@ function New-LibertixPartition {
         return $volume.DriveLetter
     }
     catch {
-        Write-Status "Failed to create partition: $_"
-        Write-Status "Attempting to restore C: drive..."
+        Write-Status "Initial attempt to create partition failed. Retrying..."
+        Start-Sleep -Seconds 5
+
         try {
+            $windowsPartition = Get-Partition -DriveLetter C
             $supportedSize = Get-PartitionSupportedSize -DriveLetter C
-            if ($windowsPartition.Size -lt $supportedSize.SizeMax) {
-                Resize-Partition -DriveLetter C -Size $supportedSize.SizeMax
+            $currentSize = $windowsPartition.Size
+            $availableSpace = $currentSize - $supportedSize.SizeMin
+            
+            if ($availableSpace -lt ($RequiredSpaceMB * 1MB)) {
+                throw "Not enough available space. Required: $RequiredSpaceMB MB, Available: $([math]::Floor($availableSpace / 1MB)) MB"
             }
-        } catch {
-            Write-Status "Warning: Failed to restore C: drive size"
+
+            $newSizeBytes = $currentSize - ($RequiredSpaceMB * 1MB)
+            if ($newSizeBytes -lt $supportedSize.SizeMin) {
+                throw "Reducing partition would make it smaller than minimum size"
+            }
+
+            Resize-Partition -DriveLetter C -Size $newSizeBytes
+            
+            $disk = Get-Disk | Where-Object { $_.Path -eq $windowsPartition.DiskPath }
+            $newPartition = New-Partition -DiskNumber $disk.Number -Size ($RequiredSpaceMB * 1MB) -AssignDriveLetter
+            
+            if (-not $newPartition) {
+                throw "Failed to create new partition"
+            }
+
+            Start-Sleep -Seconds 2  # Wait for drive letter assignment
+            $volume = $newPartition | Get-Volume
+            if (-not $volume.DriveLetter) {
+                throw "New partition has no drive letter assigned"
+            }
+            
+            Format-Volume -DriveLetter $volume.DriveLetter -FileSystem FAT32 -NewFileSystemLabel "LIBERTIX" -Force
+            return $volume.DriveLetter
         }
-        throw
+        catch {
+            Write-Status "Second attempt also failed. Reverting changes..."
+            Invoke-Revert
+            throw
+        }
     }
 }
 
@@ -156,11 +194,53 @@ function Get-DriveLetter {
     throw "Failed to get valid drive letter after $maxAttempts attempts"
 }
 
+function Test-EfiBootSupport {
+    param($IsoDriveLetter)
+    
+    $efiPath = "${IsoDriveLetter}:\EFI\BOOT\bootx64.efi"
+    return Test-Path $efiPath
+}
+
+function Copy-LegacyBootFiles {
+    param($IsoDriveLetter, $DestDriveLetter)
+    
+    $bootPaths = @(
+        "isolinux\isolinux.bin",
+        "isolinux\",
+        "syslinux\syslinux.bin",
+        "syslinux\"
+    )
+    
+    $foundBootFile = $false
+    foreach ($path in $bootPaths) {
+        $sourcePath = "${IsoDriveLetter}:\$path"
+        if (Test-Path $sourcePath) {
+            $destPath = "${DestDriveLetter}:\$path"
+            
+            if (-not (Test-Path (Split-Path $destPath))) {
+                New-Item -ItemType Directory -Path (Split-Path $destPath) -Force | Out-Null
+            }
+            
+            Copy-Item -Path $sourcePath -Destination $destPath -Force -Recurse
+            $foundBootFile = $true
+        }
+    }
+    
+    return $foundBootFile
+}
+
 # Main execution block
 try {
     if ($Revert) {
         Invoke-Revert
         exit 0
+    }
+
+    # Check for and handle leftover ISO file
+    $outFile = Join-Path $PSScriptRoot "libertix.iso"
+    if ((Test-Path $outFile) -and (-not $IsoUrl)) {
+        Write-Status "Removing leftover ISO file from previous run..."
+        Remove-Item -Path $outFile -Force
     }
 
     $url = $IsoUrl
@@ -176,8 +256,12 @@ try {
     }
     Write-Status "Created and formatted partition ${driveLetter}"
 
-    $outFile = Join-Path $PSScriptRoot "libertix.iso"
-    Get-IsoFile -Url $url -OutFile $outFile -ExpectedSize $fileSize
+    if (-not $LocalIso) {
+        Get-IsoFile -Url $url -OutFile $outFile -ExpectedSize $fileSize
+    } else {
+        Write-Status "Using local ISO file: $LocalIso"
+        $outFile = $LocalIso
+    }
 
     Write-Status "Mounting ISO and copying contents..."
     $mountResult = Mount-DiskImage -ImagePath $outFile -PassThru
@@ -210,13 +294,20 @@ try {
         Copy-Item -Path "${isoDrive}:\*" -Destination $destPath -Recurse -Force -ErrorAction Stop
         Write-Status "Files copied successfully"
 
-        $efiPath = Join-Path $destPath "EFI\BOOT"
-        if (-not (Test-Path $efiPath)) {
-            New-Item -ItemType Directory -Path $efiPath -Force | Out-Null
-        }
-
-        if (Test-Path "${isoDrive}:\EFI\BOOT\bootx64.efi") {
+        $isEfiBoot = Test-EfiBootSupport -IsoDriveLetter $isoDrive
+        if ($isEfiBoot) {
+            Write-Status "Detected EFI boot support"
+            $efiPath = Join-Path $destPath "EFI\BOOT"
+            if (-not (Test-Path $efiPath)) {
+                New-Item -ItemType Directory -Path $efiPath -Force | Out-Null
+            }
             Copy-Item "${isoDrive}:\EFI\BOOT\bootx64.efi" -Destination $efiPath -Force
+        } else {
+            Write-Status "No EFI boot support detected, attempting legacy boot"
+            $hasLegacyBoot = Copy-LegacyBootFiles -IsoDriveLetter $isoDrive -DestDriveLetter $destDrive
+            if (-not $hasLegacyBoot) {
+                Write-Warning "No boot files found. The partition might not be bootable."
+            }
         }
 
         Write-Status "Process completed successfully. The system can now be booted from partition ${destDrive}"

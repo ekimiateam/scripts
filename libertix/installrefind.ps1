@@ -16,65 +16,6 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
     exit 1
 }
 
-# Handle revert operation
-if ($Revert) {
-    Write-Log "Reverting to Windows Boot Manager..." "Cyan"
-    try {
-        # Set Windows Boot Manager as default
-        bcdedit /set "{bootmgr}" path \EFI\Microsoft\Boot\bootmgfw.efi
-        
-        # Mount EFI partition to remove rEFInd files
-        if (Test-Path -Path "Z:\") {
-            $removeDiskpartScript = @"
-select volume Z
-remove letter=Z
-exit
-"@
-            $removeDiskpartFile = [System.IO.Path]::GetTempFileName()
-            $removeDiskpartScript | Out-File -FilePath $removeDiskpartFile -Encoding ASCII
-            diskpart /s $removeDiskpartFile
-            Remove-Item -Path $removeDiskpartFile -Force
-            Start-Sleep -Seconds 2
-        }
-
-        $diskpartScript = @"
-select disk 0
-list partition
-select partition 1
-assign letter=Z
-exit
-"@
-        $diskpartFile = [System.IO.Path]::GetTempFileName()
-        $diskpartScript | Out-File -FilePath $diskpartFile -Encoding ASCII
-        diskpart /s $diskpartFile
-        Remove-Item -Path $diskpartFile -Force
-        Start-Sleep -Seconds 2
-
-        # Remove rEFInd directory if it exists
-        if (Test-Path -Path "Z:\EFI\refind") {
-            Remove-Item -Path "Z:\EFI\refind" -Recurse -Force
-        }
-
-        # Cleanup mounted partition
-        $cleanupDiskpartScript = @"
-select volume Z
-remove letter=Z
-exit
-"@
-        $cleanupDiskpartFile = [System.IO.Path]::GetTempFileName()
-        $cleanupDiskpartScript | Out-File -FilePath $cleanupDiskpartFile -Encoding ASCII
-        diskpart /s $cleanupDiskpartFile
-        Remove-Item -Path $cleanupDiskpartFile -Force
-
-        Write-Log "Successfully reverted to Windows Boot Manager. Please reboot your system." "Green"
-        exit 0
-    }
-    catch {
-        Write-Log "Error reverting to Windows Boot Manager: $_" "Red"
-        exit 1
-    }
-}
-
 # Check if rEFInd is already the default bootloader (unless -Force is used)
 if (-not $Force) {
     $currentBootloader = bcdedit /enum firmware | Select-String "path.*\\EFI\\refind\\refind_x64\.efi"
@@ -187,53 +128,18 @@ try {
 # Rename configuration file
 Write-Log "Setting up rEFInd configuration..." "Cyan"
 try {
-    # Try to find existing config file first
-    $possibleConfigs = @(
-        "$efiRefindPath\refind.conf-sample",
-        "$efiRefindPath\config\refind.conf-sample",
-        "$efiRefindPath\refind-sample.conf"
-    )
-
-    $configFound = $false
-    foreach ($configPath in $possibleConfigs) {
-        if (Test-Path $configPath) {
-            $targetPath = "$efiRefindPath\refind.conf"
-            Copy-Item -Path $configPath -Destination $targetPath -Force
-            $configFound = $true
-            Write-Log "Configuration file copied from $configPath" "Green"
-            break
-        }
-    }
-
-    if (-not $configFound) {
-        Write-Log "Creating basic rEFInd configuration file..." "Yellow"
-        $basicConfig = @"
-# Basic rEFInd configuration file
-
-# Timeout in seconds for the main menu screen
-timeout 20
-
-# Set the default selection to be the first detected OS
-default_selection 1
-
-# Reduce mouse polling rate to avoid interference with some USB 3.0 devices
-mouse_speed 4
-
-# Scan for bootloaders
-scanfor manual,external,optical,internal
-
-# Enable loading drivers
-scan_driver_dirs EFI/refind/drivers_x64
-
-# Boot screen preferences
-resolution 1920 1080
-use_graphics_for linux,windows
-"@
-        $basicConfig | Out-File -FilePath "$efiRefindPath\refind.conf" -Encoding ASCII -Force
-        Write-Log "Created basic configuration file" "Green"
+    $configPath = "$efiRefindPath\refind.conf-sample"
+    if (Test-Path $configPath) {
+        $targetPath = "$efiRefindPath\refind.conf"
+        Copy-Item -Path $configPath -Destination $targetPath -Force
+        Write-Log "Configuration file copied from refind.conf-sample" "Green"
+    } else {
+        Write-Log "Error: Could not find refind.conf-sample" "Red"
+        exit 1
     }
 } catch {
-    Write-Log "Warning: Could not set up configuration file: $_" "Yellow"
+    Write-Log "Error setting up configuration file: $_" "Red"
+    exit 1
 }
 
 # Set rEFInd as default boot manager
