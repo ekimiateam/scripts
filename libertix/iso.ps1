@@ -13,11 +13,14 @@ Write-Output "Partition resized. Reserved space: $requiredSpaceMB MB"
 $disk = Get-Disk | Where-Object { $_.Path -eq $windowsPartition.DiskPath }
 $newPartition = New-Partition -DiskNumber $disk.Number -Size ($requiredSpaceMB * 1MB) -AssignDriveLetter
 $driveLetter = $newPartition.DriveLetter
-Write-Output "Created new partition with drive letter: $driveLetter"
 
-# Format the new partition
-Format-Volume -DriveLetter $driveLetter -FileSystem NTFS -Force
-Write-Output "Formatted partition ${driveLetter}"
+# Change partition type to ESP
+$partitionGUID = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B" # EFI System Partition GUID
+$newPartition | Set-Partition -GptType $partitionGUID
+
+# Format as FAT32 instead of NTFS
+Format-Volume -DriveLetter $driveLetter -FileSystem FAT32 -Force
+Write-Output "Formatted partition ${driveLetter} as FAT32 EFI System Partition"
 
 $outFile = Join-Path $PSScriptRoot "archlinux.iso"
 if (Test-Path $outFile) {
@@ -52,64 +55,39 @@ if (Test-Path $outFile) {
 
 Write-Output "Writing ISO to partition ${driveLetter}..."
 
-# Define Win32 API functions
-$code = @"
-using System;
-using System.Runtime.InteropServices;
+# Download and extract dd if not present
+$ddPath = Join-Path $PSScriptRoot "dd.exe"
+if (-not (Test-Path $ddPath)) {
+    $ddZipUrl = "http://www.chrysocome.net/downloads/bf8163783362fa7d5f9b5a2bd0e3a2de/dd-0.5.zip"
+    $ddZipPath = Join-Path $PSScriptRoot "dd.zip"
+    Invoke-WebRequest -Uri $ddZipUrl -OutFile $ddZipPath
+    Expand-Archive -Path $ddZipPath -DestinationPath $PSScriptRoot
+    Remove-Item $ddZipPath
+}
 
-public class DiskIO {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr CreateFile(
-        string lpFileName,
-        uint dwDesiredAccess,
-        uint dwShareMode,
-        IntPtr lpSecurityAttributes,
-        uint dwCreationDisposition,
-        uint dwFlagsAndAttributes,
-        IntPtr hTemplateFile);
+# Write ISO to partition using dd
+$volumePath = "\\.\${driveLetter}:"
+& $ddPath if="$outFile" of="$volumePath" bs=4M --progress
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool WriteFile(
-        IntPtr hFile,
-        byte[] lpBuffer,
-        uint nNumberOfBytesToWrite,
-        out uint lpNumberOfBytesWritten,
-        IntPtr lpOverlapped);
+if ($LASTEXITCODE -eq 0) {
+    Write-Output "ISO successfully written to partition ${driveLetter}"
+    Write-Output "Process completed. The system can now be booted from partition ${driveLetter}"
+    Set-Volume -DriveLetter $driveLetter -NewFileSystemLabel "ARCHISO"
+    Write-Output "Partition labeled as ARCHISO for rEFInd detection"
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool CloseHandle(IntPtr hFile);
-        
-    public static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+    $refindConf = "C:\EFI\refind\refind.conf"
+    if (Test-Path $refindConf) {
+        Add-Content $refindConf @"
+menuentry "Arch ISO (ARCHISO)" {
+    volume  "ARCHISO"
+    loader  \EFI\boot\bootx64.efi
+    icon    \EFI\refind\icons\os_arch.png
 }
 "@
-Add-Type -TypeDefinition $code
-
-# Constants
-$GENERIC_WRITE = 0x40000000
-$FILE_SHARE_WRITE = 0x2
-$OPEN_EXISTING = 3
-
-$handle = [DiskIO]::CreateFile($volumePath, $GENERIC_WRITE, $FILE_SHARE_WRITE, [IntPtr]::Zero, $OPEN_EXISTING, 0, [IntPtr]::Zero)
-
-if ($handle -eq [DiskIO]::INVALID_HANDLE_VALUE) {
-    throw "Failed to open disk. Error code: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+        Write-Output "Added Arch ISO entry to rEFInd config."
+    } else {
+        Write-Output "rEFInd config not found. Please add an entry manually."
+    }
+} else {
+    throw "Failed to write ISO to partition. dd exit code: $LASTEXITCODE"
 }
-
-try {
-    $buffer = [System.IO.File]::ReadAllBytes($outFile)
-    $bytesWritten = 0
-    if (![DiskIO]::WriteFile($handle, $buffer, $buffer.Length, [ref]$bytesWritten, [IntPtr]::Zero)) {
-        throw "Failed to write to disk. Error code: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
-    }
-    
-    if ($bytesWritten -ne $buffer.Length) {
-        throw "Failed to write all bytes. Written: $bytesWritten, Expected: $($buffer.Length)"
-    }
-} finally {
-    if ($handle -ne [DiskIO]::INVALID_HANDLE_VALUE) {
-        [DiskIO]::CloseHandle($handle)
-    }
-}
-
-Write-Output "ISO successfully written to partition ${driveLetter}"
-Write-Output "Process completed. The system can now be booted from partition ${driveLetter}"
