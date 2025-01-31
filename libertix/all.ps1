@@ -4,22 +4,57 @@ param(
     [switch]$Revert = $false,
     [switch]$NoDownload = $false,
     [string]$IsoUrl = "https://mirrors.ircam.fr/pub/zorinos-isos/17/Zorin-OS-17.2-Core-64-bit.iso",
-    [string]$LocalIso
+    [string]$LocalIso,
+    [switch]$RefindOnly = $false,
+    [switch]$IsoOnly = $false,
+    [switch]$Help = $false
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+try {
+    $logPath = Join-Path $PSScriptRoot "latest.log"
+    if (Test-Path $logPath) {
+        Remove-Item $logPath -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    Write-Warning "Could not clean up old log file: $_"
+}
+
 function Write-Log($Message, [string]$Color = "White") {
     $timeStampedMessage = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message"
     Write-Host $timeStampedMessage -ForegroundColor $Color
-    Add-Content -Path (Join-Path $PSScriptRoot "latest.log") -Value $timeStampedMessage
+    
+    $logPath = Join-Path $PSScriptRoot "latest.log"
+    $maxRetries = 3
+    $retryDelay = 1
+
+    for ($i = 0; $i -lt $maxRetries; $i++) {
+        try {
+            [System.IO.File]::AppendAllText($logPath, "$timeStampedMessage`n")
+            break
+        }
+        catch {
+            if ($i -eq ($maxRetries - 1)) {
+                Write-Warning "Failed to write to log file after $maxRetries attempts: $_"
+            }
+            else {
+                Start-Sleep -Seconds $retryDelay
+            }
+        }
+    }
 }
 
 # Ensure the script is running as Administrator
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Log "This script must be run as Administrator. Please restart PowerShell as Administrator and try again." "Red"
     exit 1
+}
+
+if ($Help) {
+    Write-Host "Usage: .\all.ps1 [-Force] [-Revert] [-NoDownload] [-IsoUrl <url>] [-LocalIso <path>] [-RefindOnly] [-IsoOnly] [-Help]"
+    exit 0
 }
 
 function Invoke-Revert {
@@ -43,16 +78,50 @@ function Invoke-Revert {
 
         if (-not $libertixPartition) {
             Write-Log "No LIBERTIX partition found. Nothing to revert." "Yellow"
-            return
+        } else {
+            $diskNumber = $libertixPartition.DiskNumber
+            Remove-Partition -DiskNumber $diskNumber -PartitionNumber $libertixPartition.PartitionNumber -Confirm:$false
+
+            $maxSize = (Get-PartitionSupportedSize -DriveLetter C).SizeMax
+            Resize-Partition -DriveLetter C -Size $maxSize
+
+            Write-Log "LIBERTIX partition removed and C: drive extended." "Green"
         }
 
-        $diskNumber = $libertixPartition.DiskNumber
-        Remove-Partition -DiskNumber $diskNumber -PartitionNumber $libertixPartition.PartitionNumber -Confirm:$false
+        Write-Log "Removing rEFInd from the EFI partition..." "Cyan"
+        $diskpartScript = @"
+select disk 0
+select partition 1
+assign letter=Z
+exit
+"@
+        $diskpartFile = [System.IO.Path]::GetTempFileName()
+        $diskpartScript | Out-File -FilePath $diskpartFile -Encoding ASCII
+        diskpart /s $diskpartFile
+        Remove-Item -Path $diskpartFile -Force
 
-        $maxSize = (Get-PartitionSupportedSize -DriveLetter C).SizeMax
-        Resize-Partition -DriveLetter C -Size $maxSize
+        $refindFolder = "Z:\EFI\refind"
+        if (Test-Path $refindFolder) {
+            Remove-Item -Path $refindFolder -Recurse -Force
+            Write-Log "Removed rEFInd folder" "Yellow"
+        }
 
-        Write-Log "Revert completed successfully. LIBERTIX partition removed and C: drive extended." "Green"
+        bcdedit /set "{bootmgr}" path \EFI\Microsoft\Boot\bootmgfw.efi
+        bcdedit /set "{bootmgr}" description "Windows Boot Manager"
+
+        Unregister-ScheduledTask -TaskName "Reset-rEFInd" -Confirm:$false -ErrorAction SilentlyContinue
+
+        $diskpartScript = @"
+select volume Z
+remove letter=Z
+exit
+"@
+        $diskpartFile = [System.IO.Path]::GetTempFileName()
+        $diskpartScript | Out-File -FilePath $diskpartFile -Encoding ASCII
+        diskpart /s $diskpartFile
+        Remove-Item -Path $diskpartFile -Force
+
+        Write-Log "rEFInd reverted successfully" "Green"
     }
     catch {
         Write-Log "Failed to revert changes: $_" "Red"
@@ -238,67 +307,68 @@ try {
         exit 0
     }
 
-    # rEFInd Installation
-    if (-not $Force) {
-        $currentBootloader = bcdedit /enum firmware | Select-String "path.*\\EFI\\refind\\refind_x64\.efi"
-        if ($currentBootloader) {
-            Write-Log "rEFInd is already installed as the default bootloader." "Yellow"
-            Write-Log "Use -Force parameter to reinstall anyway (e.g., '.\script.ps1 -Force')" "Yellow"
-            exit 0
+    if (-not $IsoOnly) {
+        # rEFInd Installation
+        if (-not $Force) {
+            $currentBootloader = bcdedit /enum firmware | Select-String "path.*\\EFI\\refind\\refind_x64\.efi"
+            if ($currentBootloader) {
+                Write-Log "rEFInd is already installed as the default bootloader." "Yellow"
+                Write-Log "Use -Force parameter to reinstall anyway (e.g., '.\script.ps1 -Force')" "Yellow"
+                exit 0
+            }
         }
-    }
 
-    $refindUrl = "https://freefr.dl.sourceforge.net/project/refind/0.14.2/refind-bin-0.14.2.zip"
-    $downloadPath = Join-Path $PSScriptRoot "refind.zip"
-    $extractPath = Join-Path $PSScriptRoot "refind"
-    $efiPartition = "Z:"
-    $efiRefindPath = "$efiPartition\EFI\refind"
+        $refindUrl = "https://freefr.dl.sourceforge.net/project/refind/0.14.2/refind-bin-0.14.2.zip"
+        $downloadPath = Join-Path $PSScriptRoot "refind.zip"
+        $extractPath = Join-Path $PSScriptRoot "refind"
+        $efiPartition = "Z:"
+        $efiRefindPath = "$efiPartition\EFI\refind"
 
-    if (-not $NoDownload) {
-        Write-Log "Downloading rEFInd..." "Cyan"
+        if (-not $NoDownload) {
+            Write-Log "Downloading rEFInd..." "Cyan"
+            try {
+                Invoke-WebRequest -Uri $refindUrl -OutFile $downloadPath -ErrorAction Stop
+            } catch {
+                Write-Log "Error downloading rEFInd: $_" "Red"
+                exit 1
+            }
+        }
+
+        Write-Log "Extracting rEFInd..." "Cyan"
         try {
-            Invoke-WebRequest -Uri $refindUrl -OutFile $downloadPath -ErrorAction Stop
+            Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractPath -Force -ErrorAction Stop
         } catch {
-            Write-Log "Error downloading rEFInd: $_" "Red"
+            Write-Log "Error extracting rEFInd: $_" "Red"
             exit 1
         }
-    }
 
-    Write-Log "Extracting rEFInd..." "Cyan"
-    try {
-        Expand-Archive -Path $downloadPath -DestinationPath $extractPath -Force -ErrorAction Stop
-    } catch {
-        Write-Log "Error extracting rEFInd: $_" "Red"
-        exit 1
-    }
+        $refindFolder = Get-ChildItem -Path $extractPath -Directory | Where-Object { $_.Name -like "refind*" } | Select-Object -First 1
+        if (-not $refindFolder) {
+            Write-Log "Error: Could not locate rEFInd folder in the extracted files." "Red"
+            exit 1
+        }
 
-    $refindFolder = Get-ChildItem -Path $extractPath -Directory | Where-Object { $_.Name -like "refind*" } | Select-Object -First 1
-    if (-not $refindFolder) {
-        Write-Log "Error: Could not locate rEFInd folder in the extracted files." "Red"
-        exit 1
-    }
+        Write-Log "Disabling Windows Fast Startup..." "Cyan"
+        try {
+            powercfg /h off
+        } catch {
+            Write-Log "Warning: Could not disable Fast Startup: $_" "Yellow"
+        }
 
-    Write-Log "Disabling Windows Fast Startup..." "Cyan"
-    try {
-        powercfg /h off
-    } catch {
-        Write-Log "Warning: Could not disable Fast Startup: $_" "Yellow"
-    }
-
-    if (Test-Path -Path "Z:\") {
-        $removeDiskpartScript = @"
+        if (Test-Path -Path "Z:\") {
+            $removeDiskpartScript = @"
 select volume Z
 remove letter=Z
 exit
 "@
-        $removeDiskpartFile = [System.IO.Path]::GetTempFileName()
-        $removeDiskpartScript | Out-File -FilePath $removeDiskpartFile -Encoding ASCII
-        diskpart /s $removeDiskpartFile
-        Remove-Item -Path $removeDiskpartFile -Force
-        Start-Sleep -Seconds 2
-    }
+            $removeDiskpartFile = [System.IO.Path]::GetTempFileName()
+            $removeDiskpartScript | Out-File -FilePath $removeDiskpartFile -Encoding ASCII
+            diskpart /s $removeDiskpartFile
+            Remove-Item -Path $removeDiskpartFile -Force
+            Start-Sleep -Seconds 2
+        }
 
-    $diskpartScript = @"
+        $diskpartScript = @"
 select disk 0
 list partition
 select partition 1
@@ -306,156 +376,202 @@ assign letter=Z
 exit
 "@
 
-    $diskpartFile = [System.IO.Path]::GetTempFileName()
-    $diskpartScript | Out-File -FilePath $diskpartFile -Encoding ASCII
-    diskpart /s $diskpartFile
-    Remove-Item -Path $diskpartFile -Force
+        $diskpartFile = [System.IO.Path]::GetTempFileName()
+        $diskpartScript | Out-File -FilePath $diskpartFile -Encoding ASCII
+        diskpart /s $diskpartFile
+        Remove-Item -Path $diskpartFile -Force
 
-    $retryCount = 0
-    $maxRetries = 3
-    while (-not (Test-Path -Path "Z:\") -and $retryCount -lt $maxRetries) {
-        Start-Sleep -Seconds 2
-        $retryCount++
-    }
-
-    if (-not (Test-Path -Path "Z:\")) {
-        Write-Log "Error: Failed to mount EFI partition after multiple attempts." "Red"
-        exit 1
-    }
-
-    Write-Log "Copying rEFInd files to EFI partition..." "Cyan"
-    try {
-        if (-not (Test-Path -Path $efiRefindPath)) {
-            New-Item -ItemType Directory -Path $efiRefindPath -Force | Out-Null
+        $retryCount = 0
+        $maxRetries = 3
+        while (-not (Test-Path -Path "Z:\") -and $retryCount -lt $maxRetries) {
+            Start-Sleep -Seconds 2
+            $retryCount++
         }
-        Copy-Item -Path "$($refindFolder.FullName)\refind\*" -Destination $efiRefindPath -Recurse -Force -ErrorAction Stop
-    } catch {
-        Write-Log "Error copying rEFInd files: $_" "Red"
-        exit 1
-    }
 
-    Write-Log "Setting up rEFInd configuration..." "Cyan"
-    try {
-        $configPath = "$efiRefindPath\refind.conf-sample"
-        if (Test-Path $configPath) {
-            $targetPath = "$efiRefindPath\refind.conf"
-            Copy-Item -Path $configPath -Destination $targetPath -Force
-            Write-Log "Configuration file copied from refind.conf-sample" "Green"
-        } else {
-            Write-Log "Error: Could not find refind.conf-sample" "Red"
+        if (-not (Test-Path -Path "Z:\")) {
+            Write-Log "Error: Failed to mount EFI partition after multiple attempts." "Red"
             exit 1
         }
-    } catch {
-        Write-Log "Error setting up configuration file: $_" "Red"
-        exit 1
-    }
 
-    Write-Log "Setting rEFInd as default boot manager..." "Cyan"
-    try {
-        bcdedit /set "{bootmgr}" path \EFI\refind\refind_x64.efi
-        bcdedit /set "{bootmgr}" description "rEFInd Boot Manager"
-    } catch {
-        Write-Log "Error setting rEFInd as default boot manager: $_" "Red"
-        exit 1
-    }
+        Write-Log "Copying rEFInd files to EFI partition..." "Cyan"
+        try {
+            if (-not (Test-Path -Path $efiRefindPath)) {
+                New-Item -ItemType Directory -Path $efiRefindPath -Force | Out-Null
+            }
+            Copy-Item -Path "$($refindFolder.FullName)\refind\*" -Destination $efiRefindPath -Recurse -Force
 
-    Write-Log "Cleaning up temporary files..." "Cyan"
-    if (-not $NoDownload) {
-        Remove-Item -Path $downloadPath -Force
-    }
-    Remove-Item -Path $extractPath -Recurse -Force
+            # Setup refind.conf while preserving original content
+            $configPath = "$efiRefindPath\refind.conf-sample"
+            $refindConf = "$efiRefindPath\refind.conf"
+            
+            # First copy the sample config
+            Copy-Item -Path $configPath -Destination $refindConf -Force
 
-    Write-Log "Removing temporary drive letter..." "Cyan"
-    $cleanupDiskpartScript = @"
+            # Then append our settings
+            $customConfig = @"
+# Custom settings
+enable_mouse
+scanfor manual,internal,optical    # Scan for bootable systems
+dont_scan_entries +,"Fallback Boot*"       # Hide fallback boot entries
+"@
+            Add-Content -Path $refindConf -Value $customConfig
+
+        } catch {
+            Write-Log "Error copying files: $_" "Red"
+            exit 1
+        }
+
+        Write-Log "Setting rEFInd as default boot manager..." "Cyan"
+        try {
+            bcdedit /set "{bootmgr}" path \EFI\refind\refind_x64.efi
+            bcdedit /set "{bootmgr}" description "rEFInd Boot Manager"
+        } catch {
+            Write-Log "Error setting rEFInd as default boot manager: $_" "Red"
+            exit 1
+        }
+
+        Write-Log "Installing Rosé Pine Moon theme..." "Cyan"
+        $themeUrl = "https://ekimia.fr/theme.zip"
+        $themeZip = Join-Path $PSScriptRoot "theme.zip"
+        $themeExtractPath = Join-Path $PSScriptRoot "theme"
+
+        try {
+            Invoke-WebRequest -Uri $themeUrl -OutFile $themeZip
+            
+            if (Test-Path $themeExtractPath) {
+                Remove-Item $themeExtractPath -Recurse -Force
+            }
+            
+            Expand-Archive -Path $themeZip -DestinationPath $themeExtractPath
+            
+            # Find the actual theme directory (might be in a subfolder)
+            $themeConfPath = Get-ChildItem -Path $themeExtractPath -Recurse -Filter "theme.conf" | Select-Object -First 1
+            if (-not $themeConfPath) {
+                throw "Could not find theme.conf in the downloaded package"
+            }
+            
+            $themeDir = Split-Path $themeConfPath.FullName -Parent
+            
+            # Copy theme files to rEFInd
+            $refindThemePath = Join-Path $efiRefindPath "rose-pine"
+            if (Test-Path $refindThemePath) {
+                Remove-Item $refindThemePath -Recurse -Force
+            }
+            
+            Copy-Item -Path $themeDir -Destination $refindThemePath -Recurse
+            
+            # Update refind.conf to include the theme
+            $refindConf = "$efiRefindPath\refind.conf"
+            Add-Content -Path $refindConf -Value "`ninclude rose-pine/theme.conf"
+            
+            Write-Log "Rosé Pine Moon theme installed successfully" "Green"
+        } catch {
+            Write-Log "Error installing theme: $_" "Red"
+        } finally {
+            if (Test-Path $themeZip) { Remove-Item $themeZip -Force }
+            if (Test-Path $themeExtractPath) { Remove-Item $themeExtractPath -Recurse -Force }
+        }
+
+        Write-Log "Cleaning up temporary files..." "Cyan"
+        if (-not $NoDownload) {
+            Remove-Item -Path $downloadPath -Force
+        }
+        Remove-Item -Path $extractPath -Recurse -Force
+
+        Write-Log "Removing temporary drive letter..." "Cyan"
+        $cleanupDiskpartScript = @"
 select volume Z
 remove letter=Z
 exit
 "@
-    $cleanupDiskpartFile = [System.IO.Path]::GetTempFileName()
-    $cleanupDiskpartScript | Out-File -FilePath $cleanupDiskpartFile -Encoding ASCII
-    diskpart /s $cleanupDiskpartFile
-    Remove-Item -Path $cleanupDiskpartFile -Force
+        $cleanupDiskpartFile = [System.IO.Path]::GetTempFileName()
+        $cleanupDiskpartScript | Out-File -FilePath $cleanupDiskpartFile -Encoding ASCII
+        diskpart /s $cleanupDiskpartFile
+        Remove-Item -Path $cleanupDiskpartFile -Force
 
-    Write-Log "rEFInd installation complete!" "Green"
-
-    # ISO Setup
-    $outFile = Join-Path $PSScriptRoot "libertix.iso"
-    if ((Test-Path $outFile) -and (-not $IsoUrl)) {
-        Write-Log "Removing leftover ISO file from previous run..." "Cyan"
-        Remove-Item -Path $outFile -Force
+        Write-Log "rEFInd installation complete!" "Green"
     }
 
-    $url = $IsoUrl
-    $response = Invoke-WebRequest -Uri $url -Method Head
-    $fileSize = [long]$response.Headers["Content-Length"]
-    $requiredSpaceMB = [math]::Ceiling($fileSize / 1MB) + 500
-    
-    Write-Log "Required space: $requiredSpaceMB MB" "Cyan"
-    
-    $driveLetter = New-LibertixPartition -RequiredSpaceMB $requiredSpaceMB
-    if (-not $driveLetter) {
-        throw "Failed to get valid drive letter for new partition"
-    }
-    Write-Log "Created and formatted partition ${driveLetter}" "Green"
-
-    if (-not $LocalIso) {
-        Get-IsoFile -Url $url -OutFile $outFile -ExpectedSize $fileSize
-    } else {
-        Write-Log "Using local ISO file: $LocalIso" "Cyan"
-        $outFile = $LocalIso
-    }
-
-    Write-Log "Mounting ISO and copying contents..." "Cyan"
-    $mountResult = Mount-DiskImage -ImagePath $outFile -PassThru
-    Start-Sleep -Seconds 2
-    
-    try {
-        $isoDrive = Get-DriveLetter -Volume ($mountResult | Get-Volume)
-        if (-not $isoDrive) {
-            throw "Failed to get ISO drive letter"
+    if (-not $RefindOnly) {
+        # ISO Setup
+        $outFile = Join-Path $PSScriptRoot "libertix.iso"
+        if ((Test-Path $outFile) -and (-not $IsoUrl)) {
+            Write-Log "Removing leftover ISO file from previous run..." "Cyan"
+            Remove-Item -Path $outFile -Force
         }
-        Write-Log "ISO mounted at ${isoDrive}:" "Green"
 
-        $libertixVolume = Get-Volume | Where-Object { $_.FileSystemLabel -eq "LIBERTIX" }
-        if (-not $libertixVolume) {
-            throw "Cannot find LIBERTIX volume"
-        }
+        $url = $IsoUrl
+        $response = Invoke-WebRequest -Uri $url -Method Head
+        $fileSize = [long]$response.Headers["Content-Length"]
+        $requiredSpaceMB = [math]::Ceiling($fileSize / 1MB) + 500
         
-        $destDrive = $libertixVolume.DriveLetter
-        if (-not $destDrive -or -not ($destDrive -match '^[A-Z]$')) {
-            throw "Invalid destination drive letter: $destDrive"
+        Write-Log "Required space: $requiredSpaceMB MB" "Cyan"
+        
+        $driveLetter = New-LibertixPartition -RequiredSpaceMB $requiredSpaceMB
+        if (-not $driveLetter) {
+            throw "Failed to get valid drive letter for new partition"
         }
-        Write-Log "Copying files to ${destDrive}:" "Cyan"
+        Write-Log "Created and formatted partition ${driveLetter}" "Green"
 
-        $destPath = "${destDrive}:"
-        if (-not (Test-Path "${isoDrive}:\")) {
-            throw "Cannot access mounted ISO at ${isoDrive}:"
-        }
-
-        Copy-Item -Path "${isoDrive}:\*" -Destination $destPath -Recurse -Force -ErrorAction Stop
-        Write-Log "Files copied successfully" "Green"
-
-        $isEfiBoot = Test-EfiBootSupport -IsoDriveLetter $isoDrive
-        if ($isEfiBoot) {
-            Write-Log "Detected EFI boot support" "Green"
-            $efiPath = Join-Path $destPath "EFI\BOOT"
-            if (-not (Test-Path $efiPath)) {
-                New-Item -ItemType Directory -Path $efiPath -Force | Out-Null
-            }
-            Copy-Item "${isoDrive}:\EFI\BOOT\bootx64.efi" -Destination $efiPath -Force
+        if (-not $LocalIso) {
+            Get-IsoFile -Url $url -OutFile $outFile -ExpectedSize $fileSize
         } else {
-            Write-Log "No EFI boot support detected, attempting legacy boot" "Yellow"
-            $hasLegacyBoot = Copy-LegacyBootFiles -IsoDriveLetter $isoDrive -DestDriveLetter $destDrive
-            if (-not $hasLegacyBoot) {
-                Write-Log "No boot files found. The partition might not be bootable." "Yellow"
-            }
+            Write-Log "Using local ISO file: $LocalIso" "Cyan"
+            $outFile = $LocalIso
         }
 
-        Write-Log "Process completed successfully. The system can now be booted from partition ${destDrive}" "Green"
-    }
-    finally {
-        Write-Log "Dismounting ISO..." "Cyan"
-        Dismount-DiskImage -ImagePath $outFile
+        Write-Log "Mounting ISO and copying contents..." "Cyan"
+        $mountResult = Mount-DiskImage -ImagePath $outFile -PassThru
+        Start-Sleep -Seconds 2
+        
+        try {
+            $isoDrive = Get-DriveLetter -Volume ($mountResult | Get-Volume)
+            if (-not $isoDrive) {
+                throw "Failed to get ISO drive letter"
+            }
+            Write-Log "ISO mounted at ${isoDrive}:" "Green"
+
+            $libertixVolume = Get-Volume | Where-Object { $_.FileSystemLabel -eq "LIBERTIX" }
+            if (-not $libertixVolume) {
+                throw "Cannot find LIBERTIX volume"
+            }
+            
+            $destDrive = $libertixVolume.DriveLetter
+            if (-not $destDrive -or -not ($destDrive -match '^[A-Z]$')) {
+                throw "Invalid destination drive letter: $destDrive"
+            }
+            Write-Log "Copying files to ${destDrive}:" "Cyan"
+
+            $destPath = "${destDrive}:"
+            if (-not (Test-Path "${isoDrive}:\")) {
+                throw "Cannot access mounted ISO at ${isoDrive}:"
+            }
+
+            Copy-Item -Path "${isoDrive}:\*" -Destination $destPath -Recurse -Force -ErrorAction Stop
+            Write-Log "Files copied successfully" "Green"
+
+            $isEfiBoot = Test-EfiBootSupport -IsoDriveLetter $isoDrive
+            if ($isEfiBoot) {
+                Write-Log "Detected EFI boot support" "Green"
+                $efiPath = Join-Path $destPath "EFI\BOOT"
+                if (-not (Test-Path $efiPath)) {
+                    New-Item -ItemType Directory -Path $efiPath -Force | Out-Null
+                }
+                Copy-Item "${isoDrive}:\EFI\BOOT\bootx64.efi" -Destination $efiPath -Force
+            } else {
+                Write-Log "No EFI boot support detected, attempting legacy boot" "Yellow"
+                $hasLegacyBoot = Copy-LegacyBootFiles -IsoDriveLetter $isoDrive -DestDriveLetter $destDrive
+                if (-not $hasLegacyBoot) {
+                    Write-Log "No boot files found. The partition might not be bootable." "Yellow"
+                }
+            }
+
+            Write-Log "Process completed successfully. The system can now be booted from partition ${destDrive}" "Green"
+        }
+        finally {
+            Write-Log "Dismounting ISO..." "Cyan"
+            Dismount-DiskImage -ImagePath $outFile
+        }
     }
 }
 catch {
