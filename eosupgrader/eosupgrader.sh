@@ -1,9 +1,11 @@
 #!/bin/bash
 
+VERSION=230625
+
 downloaded_file=""
 
 function menu_flash() {
-    if zenity --question --title="EKIMIA" --text="Bienvenue ! Veuillez cliquer sur 'Détecter mon appareil' pour continuer." --ok-label="Détecter mon appareil" --cancel-label="Quitter"; then
+    if zenity --question --title="EKIMIA EOSUPGRADER ${VERSION}" --text="Bienvenue ! Veuillez cliquer sur 'Détecter mon appareil' pour continuer." --ok-label="Détecter mon appareil" --cancel-label="Quitter"; then
 
         device_name=$(adb shell getprop ro.product.device 2>/dev/null)
         lineage_name=$(adb shell getprop ro.lineage.device 2>/dev/null)
