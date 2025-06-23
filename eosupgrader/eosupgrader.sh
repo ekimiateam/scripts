@@ -43,51 +43,57 @@ function download_zip() {
     local codename="$1"
     local device_title="$2"
 
+#    codename="instantnoodlep"
+#    device_title="8PROOO"
+
     mkdir -p /tmp/ekimia
     local url=""
 
     case "$codename" in
         enchilada)
-            url="https://images.ecloud.global/community/enchilada/e-3.0-t-20250601497058-community-enchilada.zip"
+            url="https://images.ecloud.global/community/enchilada/e-3.0.1-t-20250609499174-community-enchilada.zip"
             ;;
         kane)
-            url="https://images.ecloud.global/community/kane/e-3.0-t-20250601497058-community-kane.zip"
+            url="https://images.ecloud.global/community/kane/e-3.0.1-t-20250609499174-community-kane.zip"
             ;;
         oriole)
-            url="https://images.ecloud.global/community/oriole/e-3.0-t-20250531497057-community-oriole.zip"
+            url="https://images.ecloud.global/community/oriole/e-3.0.1-t-20250608499173-community-oriole.zip"
             ;;
         hotdogb)
-            url="https://images.ecloud.global/community/hotdogb/e-3.0-t-20250529496537-community-hotdogb.zip"
+            url="https://images.ecloud.global/community/hotdogb/e-3.0.1-t-20250606498934-community-hotdogb.zip"
             ;;
         ocean)
-            url="https://images.ecloud.global/community/ocean/e-3.0-t-20250531497057-community-ocean.zip"
+            url="https://images.ecloud.global/community/ocean/e-3.0.1-t-20250608499173-community-ocean.zip"
             ;;
         nairo)
-            url="https://images.ecloud.global/community/nairo/e-3.0-t-20250531497057-community-nairo.zip"
+            url="https://images.ecloud.global/community/nairo/e-3.0.1-t-20250608499173-community-nairo.zip"
             ;;
         lake)
-            url="https://images.ecloud.global/community/lake/e-3.0-t-20250601497058-community-lake.zip"
+            url="https://images.ecloud.global/community/lake/e-3.0.1-t-20250609499174-community-lake.zip"
             ;;
         guacamoleb)
-            url="https://images.ecloud.global/community/guacamoleb/e-3.0-t-20250529496537-community-guacamoleb.zip"
+            url="https://images.ecloud.global/community/guacamoleb/e-3.0.1-t-20250606498934-community-guacamoleb.zip"
             ;;
         lemonade)
-            url="https://images.ecloud.global/community/lemonade/e-3.0-t-20250529496537-community-lemonade.zip"
+            url="https://images.ecloud.global/community/lemonade/e-3.0.1-t-20250606498934-community-lemonade.zip"
             ;;
         lancelot)
-            url="https://images.ecloud.global/community/lancelot/e-3.0-t-20250601497058-community-lancelot.zip"
+            url="https://images.ecloud.global/community/lancelot/e-3.0.1-t-20250609499174-community-lancelot.zip"
             ;;
         crownite)
-            url="https://images.ecloud.global/community/crownlte/e-3.0-t-20250601497058-community-crownlte.zip"
+            url="https://images.ecloud.global/community/crownlte/e-3.0.1-t-20250609499174-community-crownlte.zip"
             ;;
         kebab)
-            url="https://images.ecloud.global/community/kebab/e-3.0-t-20250601497058-community-kebab.zip"
+            url="https://images.ecloud.global/community/kebab/e-3.0.1-t-20250609499174-community-kebab.zip"
+            ;;
+        instantnoodlep)
+            url="https://images.ecloud.global/community/instantnoodlep/e-3.0.1-t-20250609499174-community-instantnoodlep.zip"
             ;;
         dumpling)
-            url="https://images.ecloud.global/community/dumpling/e-3.0-t-20250601497058-community-dumpling.zip"
+            url="https://images.ecloud.global/community/dumpling/e-3.0.1-t-20250609499174-community-dumpling.zip"
             ;;
         beyond0lte)
-            url="https://images.ecloud.global/community/beyond0lte/e-3.0-t-20250531497058-community-beyond0lte.zip"
+            url="https://images.ecloud.global/community/beyond0lte/e-3.0.1-t-20250608499174-community-beyond0lte.zip"
             ;;
         *)
             zenity --error --title="EKIMIA" --text="Appareil non reconnu : $codename\n\nVeuillez contacter le support Ekimia."
