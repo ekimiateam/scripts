@@ -91,6 +91,9 @@ function download_zip() {
         instantnoodlep)
             url="https://images.ecloud.global/community/instantnoodlep/e-3.0.1-t-20250609499174-community-instantnoodlep.zip"
             ;;
+        instantnoodle)
+            url="https://images.ecloud.global/community/instantnoodle/e-3.0.4-t-20250710507811-community-instantnoodle.zip"
+            ;;   
         dumpling)
             url="https://images.ecloud.global/community/dumpling/e-3.0.1-t-20250609499174-community-dumpling.zip"
             ;;
