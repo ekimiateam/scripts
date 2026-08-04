@@ -98,7 +98,7 @@ function download_zip() {
             url="https://images.ecloud.global/community/dumpling/e-3.0.1-t-20250609499174-community-dumpling.zip"
             ;;
         beyond0lte)
-            url="https://images.ecloud.global/community/beyond0lte/e-3.0.1-t-20250608499174-community-beyond0lte.zip"
+            url="https://images.ecloud.global/community/beyond0lte/e-3.7.2-t-20260423612682-community-beyond0lte.zip"
             ;;
         *)
             zenity --error --title="EKIMIA" --text="Appareil non reconnu : $codename\n\nVeuillez contacter le support Ekimia."
